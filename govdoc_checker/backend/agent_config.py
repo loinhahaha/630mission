@@ -10,10 +10,10 @@ from typing import Any
 
 @dataclass(frozen=True)
 class AgentConfig:
-    auth_key: str = "86125ac6cbd94e0a9e1607c405442091"
-    auth_secret: str = "ydR79bHiUlisj4KoP4Rxrjf0WmHLG0Ts"
+    auth_key: str = "your_auth_key_here"
+    auth_secret: str = "your_auth_secret_here"
     base_url: str = "https://uat.agentspro.cn"
-    agent_id: str = "dbffc1286e654d3f9a8832b5e3207b76"
+    agent_id: str = "your_agent_id_here"
 
 
 DEFAULT_CONFIG_FILENAME = "agent_config.local.json"
