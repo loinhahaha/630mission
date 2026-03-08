@@ -165,5 +165,13 @@ def test_has_agent_failure_detects_agent_notes() -> None:
     from main import _has_agent_failure
 
     assert _has_agent_failure([{"chunk_index": 0, "notes": [{"type": "agent", "message": "大模型调用失败：xxx"}]}])
-    assert _has_agent_failure([{"chunk_index": 0, "notes": [{"type": "agent", "message": "未配置智能体鉴权参数"}]}])
+    assert not _has_agent_failure([{"chunk_index": 0, "notes": [{"type": "agent", "message": "未配置智能体鉴权参数"}]}])
     assert not _has_agent_failure([{"chunk_index": 0, "notes": []}])
+
+
+def test_has_agent_failure_only_flags_real_failures() -> None:
+    from main import _has_agent_failure
+
+    assert _has_agent_failure([{"chunk_index": 0, "notes": [{"type": "agent", "message": "stream_error"}]}])
+    assert _has_agent_failure([{"chunk_index": 0, "notes": [{"type": "agent", "message": "http_error"}]}])
+    assert not _has_agent_failure([{"chunk_index": 0, "notes": [{"type": "agent", "message": "未配置智能体鉴权参数，已跳过大模型润色。"}]}])

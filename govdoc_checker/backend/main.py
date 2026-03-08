@@ -33,7 +33,8 @@ def build_content_disposition(filename: str) -> str:
 def _has_agent_failure(agent_notes: list[dict] | None) -> bool:
     if not agent_notes:
         return False
-    hints = ("大模型调用失败", "未配置智能体鉴权参数", "stream_error", "http_error", "sync_no_answer")
+    # 未配置鉴权时会走降级文案，不应视为网关失败。
+    hints = ("大模型调用失败", "stream_error", "http_error", "sync_no_answer")
     joined = str(agent_notes)
     return any(h in joined for h in hints)
 
