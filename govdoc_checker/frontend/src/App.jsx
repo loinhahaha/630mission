@@ -184,12 +184,30 @@ export default function App() {
       const revisedText = json?.revised_text || ''
       const agentNotes = json?.agent_notes || []
       const notesStr = JSON.stringify(agentNotes)
-      const hasAgentFailure = notesStr.includes('大模型调用失败') || notesStr.includes('未配置智能体鉴权参数')
+      const hasAgentFailure = [
+        '大模型调用失败',
+        'stream_error',
+        'http_error',
+        'sync_no_answer',
+      ].some((hint) => notesStr.includes(hint))
+      const hasAgentSkipped = notesStr.includes('未配置智能体鉴权参数')
 
       setPolishOutput(revisedText)
       if (hasAgentFailure) {
         setPolishMsg('润色失败：模型接口未成功返回可用结果')
         setPolishStage('')
+        setPolishDebug([
+          ...attemptLogs,
+          '',
+          'agent_notes:',
+          JSON.stringify(agentNotes, null, 2),
+        ].join('\n'))
+        return
+      }
+
+      if (hasAgentSkipped) {
+        setPolishStage('未配置 AI 润色鉴权，当前返回原文（未执行大模型润色）。')
+        setPolishMsg('润色降级完成（返回原文）')
         setPolishDebug([
           ...attemptLogs,
           '',
