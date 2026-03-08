@@ -1,0 +1,9 @@
+# Python
+__pycache__/
+*.pyc
+
+# Node
+node_modules/
+
+# Local secret configs
+govdoc_checker/backend/agent_config.local.json
