@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
+import io
 from pathlib import Path
 import zipfile
 
 from docx import Document
-from main import build_content_disposition
+from main import build_content_disposition, _prepare_upload_path
 
 from text_slicer import slice_text
 from rules.punct_rules import check_punctuation_rules
@@ -13,7 +15,6 @@ from docx_utils import build_final_docx_from_text
 from pipeline import analyze
 import pipeline
 
-
 def test_slice_text_splits_and_preserves_order() -> None:
     text = "第一段" + "a" * 30 + "\n" + "第二段" + "b" * 30 + "\n" + "第三段" + "c" * 30
     chunks = slice_text(text, max_chars=50)
@@ -21,13 +22,11 @@ def test_slice_text_splits_and_preserves_order() -> None:
     assert "第一段" in chunks[0]
     assert "第三段" in "\n".join(chunks)
 
-
 def test_punctuation_rule_detects_multiple_repeat_punct_in_one_paragraph() -> None:
     paragraphs = ["这个句子。。还有这个！！再来一个？？"]
     issues = check_punctuation_rules(paragraphs)
     repeat_issues = [i for i in issues if "连续重复符号" in i.message]
     assert len(repeat_issues) >= 3
-
 
 def test_format_rules_warn_on_empty_content(tmp_path: Path) -> None:
     empty_docx = tmp_path / "empty.docx"
@@ -35,33 +34,33 @@ def test_format_rules_warn_on_empty_content(tmp_path: Path) -> None:
     issues = check_format_rules(str(empty_docx), [])
     assert any(i.issue_type == "结构" and "文档内容为空" in i.message for i in issues)
 
-
 def test_analyze_text_mode_produces_expected_files() -> None:
     result = analyze(mode="text", text="关于测试通知\n各部门：\n请按时完成。\n2026年2月14日")
     assert "标记后文档.docx" in result["files"]
     assert isinstance(result["annotated_bytes"], (bytes, bytearray))
 
+def test_analyze_file_mode_produces_outputs_with_generated_docx(tmp_path: Path) -> None:
+    input_path = tmp_path / "input.docx"
+    doc = Document()
+    doc.add_paragraph("关于测试通知")
+    doc.add_paragraph("各部门：")
+    doc.add_paragraph("请按时完成。")
+    doc.save(input_path)
 
-def test_analyze_user_docx_file_produces_outputs() -> None:
-    input_path = Path(__file__).resolve().parents[2] / "锦江中心年中工作会材料0805会后修改.docx"
-    assert input_path.exists(), f"missing file: {input_path}"
     result = analyze(mode="file", file_path=str(input_path), do_polish=False)
     assert isinstance(result["report"], dict)
     assert "issues" in result["report"]
     assert "标记后文档.docx" in result["files"]
-
 
 def test_build_final_docx_from_text_creates_file(tmp_path: Path) -> None:
     out = tmp_path / "定稿正文.docx"
     build_final_docx_from_text("标题\n正文第一段", str(out))
     assert out.exists() and out.stat().st_size > 0
 
-
 def test_quote_chain_rule_detects_punct_between_quotes() -> None:
     paragraphs = ["“内容1”、“内容2”"]
     issues = check_punctuation_rules(paragraphs)
     assert any(i.issue_type == "引号" and "并列引号内容之间不应加标点" in i.message for i in issues)
-
 
 def test_format_rules_detect_end_punct_and_space(tmp_path: Path) -> None:
     from docx_utils import build_final_docx_from_text
@@ -69,7 +68,6 @@ def test_format_rules_detect_end_punct_and_space(tmp_path: Path) -> None:
     build_final_docx_from_text("标题\n这是 有 空格的段落", str(out))
     issues = check_format_rules(str(out), ["标题", "这是 有 空格的段落"])
     assert any(i.issue_type == "空格" for i in issues)
-
 
 def test_annotated_doc_keeps_issue_paragraph_alignment_with_blank_lines(tmp_path: Path) -> None:
     from docx_utils import build_annotated_original_docx
@@ -90,13 +88,11 @@ def test_annotated_doc_keeps_issue_paragraph_alignment_with_blank_lines(tmp_path
     assert "【疑似存在连续重复符号：。。。】" in new_doc.paragraphs[2].text
     assert "第一段" == new_doc.paragraphs[0].text
 
-
 def test_build_content_disposition_uses_rfc5987_encoding() -> None:
     header = build_content_disposition("标记后文档.docx")
     assert "filename=annotated.docx" in header
     assert "filename*=UTF-8''" in header
     assert "%E6%A0%87%E8%AE%B0%E5%90%8E%E6%96%87%E6%A1%A3.docx" in header
-
 
 def test_analyze_polish_returns_polished_doc_as_download(monkeypatch) -> None:
     def _fake_agent(chunk: str):
@@ -108,7 +104,6 @@ def test_analyze_polish_returns_polished_doc_as_download(monkeypatch) -> None:
     assert result["download_filename"] == "润色后文档.docx"
     assert "润色后文档.docx" in result["files"]
     assert result["download_bytes"] == result["files"]["润色后文档.docx"]
-
 
 def test_load_agent_config_supports_assignment_style(tmp_path: Path, monkeypatch) -> None:
     from agent_config import load_agent_config
@@ -127,7 +122,6 @@ def test_load_agent_config_supports_assignment_style(tmp_path: Path, monkeypatch
     assert cfg.base_url == "https://uat.agentspro.cn"
     assert cfg.agent_id == "demo_agent"
 
-
 def test_load_agent_config_json_and_env_override(tmp_path: Path, monkeypatch) -> None:
     from agent_config import load_agent_config
 
@@ -145,7 +139,6 @@ def test_load_agent_config_json_and_env_override(tmp_path: Path, monkeypatch) ->
     assert cfg.base_url == "https://env-host"
     assert cfg.agent_id == "file_agent"
 
-
 def test_load_agent_config_supports_lowercase_keys(tmp_path: Path, monkeypatch) -> None:
     from agent_config import load_agent_config
 
@@ -160,6 +153,54 @@ def test_load_agent_config_supports_lowercase_keys(tmp_path: Path, monkeypatch) 
     assert cfg.base_url == "https://lower"
     assert cfg.agent_id == "a"
 
+def test_analyze_file_mode_rejects_non_doc_upload() -> None:
+    from fastapi import UploadFile
+    import main as backend_main
+
+    upload = UploadFile(filename="../../hack.txt", file=io.BytesIO(b"fake"))
+    resp = asyncio.run(backend_main.analyze(mode="file", file=upload))
+
+    assert resp.status_code == 400
+    assert '仅支持 .docx/.doc 文件' in resp.body.decode('utf-8')
+
+def test_analyze_file_mode_uses_sanitized_random_path(monkeypatch) -> None:
+    from fastapi import UploadFile
+    import main as backend_main
+
+    seen = {}
+
+    def _fake_pipeline(**kwargs):
+        seen["file_path"] = kwargs["file_path"]
+        return {
+            "download_bytes": b"PK",
+            "annotated_bytes": b"PK",
+            "download_filename": "标记后文档.docx",
+        }
+
+    monkeypatch.setattr(backend_main, "run_pipeline", _fake_pipeline)
+
+    upload = UploadFile(filename="../../hack.docx", file=io.BytesIO(b"fake"))
+    resp = asyncio.run(backend_main.analyze(mode="file", file=upload))
+
+    assert resp.status_code == 200
+    assert seen["file_path"].endswith(".docx")
+    assert ".." not in seen["file_path"]
+
+def test_prepare_upload_path_blocks_path_traversal_and_keeps_suffix(tmp_path: Path) -> None:
+    upload_path = _prepare_upload_path(str(tmp_path), "../outside/evil.DOCX")
+    upload = Path(upload_path)
+
+    assert upload.parent == tmp_path
+    assert upload.suffix == ".docx"
+    assert ".." not in upload_path
+
+def test_prepare_upload_path_rejects_non_doc_suffix(tmp_path: Path) -> None:
+    try:
+        _prepare_upload_path(str(tmp_path), "note.txt")
+    except ValueError as e:
+        assert str(e) == "仅支持 .docx/.doc 文件"
+    else:
+        raise AssertionError("expected ValueError for invalid suffix")
 
 def test_has_agent_failure_detects_agent_notes() -> None:
     from main import _has_agent_failure
@@ -167,7 +208,6 @@ def test_has_agent_failure_detects_agent_notes() -> None:
     assert _has_agent_failure([{"chunk_index": 0, "notes": [{"type": "agent", "message": "大模型调用失败：xxx"}]}])
     assert not _has_agent_failure([{"chunk_index": 0, "notes": [{"type": "agent", "message": "未配置智能体鉴权参数"}]}])
     assert not _has_agent_failure([{"chunk_index": 0, "notes": []}])
-
 
 def test_has_agent_failure_only_flags_real_failures() -> None:
     from main import _has_agent_failure

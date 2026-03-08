@@ -4,6 +4,7 @@ import io
 import os
 import tempfile
 from urllib.parse import quote
+from uuid import uuid4
 
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,12 +24,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+ALLOWED_UPLOAD_EXTENSIONS = {".docx", ".doc"}
+
+def _prepare_upload_path(temp_dir: str, original_filename: str | None) -> str:
+    orig_name = original_filename or "upload.docx"
+    safe_name = os.path.basename(orig_name)
+    ext = os.path.splitext(safe_name)[1].lower()
+    if ext not in ALLOWED_UPLOAD_EXTENSIONS:
+        raise ValueError("仅支持 .docx/.doc 文件")
+    return os.path.join(temp_dir, f"{uuid4().hex}{ext}")
 
 def build_content_disposition(filename: str) -> str:
     encoded_name = quote(filename)
     return f"attachment; filename=annotated.docx; filename*=UTF-8''{encoded_name}"
-
-
 
 def _has_agent_failure(agent_notes: list[dict] | None) -> bool:
     if not agent_notes:
@@ -38,11 +46,9 @@ def _has_agent_failure(agent_notes: list[dict] | None) -> bool:
     joined = str(agent_notes)
     return any(h in joined for h in hints)
 
-
 @app.get("/health")
 def health():
     return {"ok": True}
-
 
 @app.post("/analyze")
 async def analyze(
@@ -61,7 +67,10 @@ async def analyze(
             if mode == "file":
                 if file is None:
                     return JSONResponse({"error": "mode=file 时必须上传文件"}, status_code=400)
-                file_path = os.path.join(td, file.filename)
+                try:
+                    file_path = _prepare_upload_path(td, file.filename)
+                except ValueError as e:
+                    return JSONResponse({"error": str(e)}, status_code=400)
                 with open(file_path, "wb") as f:
                     f.write(await file.read())
 
@@ -86,7 +95,6 @@ async def analyze(
         return JSONResponse({"error": str(e)}, status_code=400)
     except Exception as e:
         return JSONResponse({"error": f"服务内部错误：{e}"}, status_code=500)
-
 
 @app.post("/polish")
 async def polish(
